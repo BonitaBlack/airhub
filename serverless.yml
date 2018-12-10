@@ -1,0 +1,26 @@
+service: at2gh
+
+plugins:
+  - serverless-secrets-plugin
+
+custom:
+  secrets: ${file(secrets.${opt:stage, self:provider.stage}.yml)}
+
+provider:
+  name: aws
+  runtime: nodejs8.10
+  environment:
+    GITHUB_API_KEY: ${self:custom.secrets.GITHUB_API_KEY}
+    AIRTABLE_API_KEY: ${self:custom.secrets.AIRTABLE_API_KEY}
+    REPO_OWNER: ${self:custom.secrets.REPO_OWNER}
+    REPO_NAME: ${self:custom.secrets.REPO_NAME}
+    AIRTABLE_BASE: ${self:custom.secrets.AIRTABLE_BASE}
+    AIRTABLE_LINK_PRE: ${self:custom.secrets.AIRTABLE_LINK_PRE}
+
+functions:
+  init:
+    handler: handler.init
+  cron:
+    handler: handler.transferTasks
+    events:
+      - schedule: rate(10 minutes)

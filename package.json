@@ -1,0 +1,28 @@
+{
+  "name": "at2gh",
+  "version": "1.0.0",
+  "description": "Synchronizes tasks between Airtable and GitHub",
+  "main": "index.js",
+  "dependencies": {
+    "airtable": "^0.5.8",
+    "github-api": "^3.0.0",
+    "random-color": "^1.0.1"
+  },
+  "devDependencies": {
+    "js-yaml": "^3.12.0",
+    "serverless-secrets-plugin": "^0.1.0"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nhynes/airhub.git"
+  },
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/nhynes/airhub/issues"
+  },
+  "homepage": "https://github.com/nhynes/airhub#readme"
+}
