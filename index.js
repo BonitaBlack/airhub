@@ -5,5 +5,5 @@ Object.assign(process.env, yaml.safeLoad(fs.readFileSync('secrets.prod.yml', 'ut
 
 const handler = require('./handler');
 
-handler.init().then(handler.transferTasks);
-// handler.transferTasks()
+// handler.init().then(handler.transferTasks);
+handler.transferTasks()

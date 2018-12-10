@@ -1,5 +1,3 @@
-'use strict';
-
 const Airtable = require('airtable');
 const GitHub = require('github-api');
 const randomColor = require('random-color');
@@ -7,48 +5,51 @@ const randomColor = require('random-color');
 const gh = new GitHub({ token: process.env.GITHUB_API_KEY });
 
 const issues = gh.getIssues(process.env.REPO_OWNER, process.env.REPO_NAME);
-const at = new Airtable().base(process.env.AIRTABLE_BASE);
+const airtable = new Airtable().base(process.env.AIRTABLE_BASE);
 
 function name2Label(name) {
-  return 'proj:' + name.toLowerCase().replace(/ /g, '-');
+  return `proj:${name.toLowerCase().replace(/ /g, '-')}`;
 }
 
-module.exports.init = async (event, context) => {
-  const projects = (await at('Projects').select({
+async function syncProjectLabels() {
+  const projId2Label = new Map((await issues.listLabels({ AcceptHeader: 'symmetra-preview' }))
+    .data.map(label => [label.description, label.name]));
+
+  const projects = (await airtable('Projects').select({
     fields: ['Name'],
-    filterByFormula: '{Complete} = 0',
+    filterByFormula: '{GitHub} = 1',
   }).all());
 
-  // delete all existing labels
-  await Promise.all((await issues.listLabels({})).data.map(label => {
-    return issues.deleteLabel(label.name);
+  await Promise.all(projects.map(proj => {
+    if (projId2Label.has(proj.id)) return;
+    return issues.createLabel({
+      name: name2Label(proj.get('Name')),
+      color: randomColor().hexString().slice(1),
+      description: proj.id,
+      AcceptHeader: 'symmetra-preview',
+    });
   }));
 
-  // add project labels
-  await projects
-    .forEach(proj => {
-      const name = proj.get('Name');
-      if (name === 'Paper') return;
-      issues.createLabel({
-        name: name2Label(name),
-        color: randomColor().hexString().slice(1),
-        description: proj.id,
-        AcceptHeader: 'symmetra-preview',
-      });
-    });
+  return projId2Label;
 }
 
+module.exports.init = async (_event, _context) => {
+  // delete all existing labels
+  await Promise.all((await issues.listLabels({})).data
+    .map(label => issues.deleteLabel(label.name)));
 
-module.exports.transferTasks = async (event, context) => {
-  const openTasks = await at('Tasks').select({
+  return syncProjectLabels();
+};
+
+module.exports.transferTasks = async (_event, _context) => {
+  const projId2Label = await syncProjectLabels();
+
+  const openTasks = await airtable('Tasks').select({
     fields: ['Name', 'Notes', 'Time Estimate', 'Project'],
     view: 'Main View',
-    filterByFormula: 'NOT({Status} = "done")'
+    filterByFormula: 'NOT({Status} = "done")',
   }).all();
-  const openTaskNames = new Set(openTasks.map(task => task.get('Name')))
-
-  const projLabels = new Map((await issues.listLabels({ AcceptHeader: 'symmetra-preview' }))
-    .data.map(label => [label.description, label.name]));
+  const openTaskNames = new Set(openTasks.map(task => task.get('Name')));
 
   const openIssues = (await issues.listIssues({ state: 'open' })).data;
   const openIssueTitles = new Set(openIssues.map(issue => issue.title));
@@ -58,14 +59,14 @@ module.exports.transferTasks = async (event, context) => {
     if (openIssueTitles.has(name)) return;
 
     const labels = task.get('Project')
-      .map(projId => projLabels.get(projId))
+      .map(projId => projId2Label.get(projId))
       .filter(label => label !== undefined);
     if (labels.length === 0) return;
 
     const desc = (task.get('Notes') || '').trim();
-    let body = desc ? '**Description**: ' + desc + '\n\n' : '';
-    body += 'Time Estimate (days): ' + task.get('Time Estimate');
-    body += '\n\n[Airtable link](' + process.env.AIRTABLE_LINK_PRE + task.id + ')';
+    let body = desc ? `**Description**: ${desc}\n\n` : '';
+    body += `Time Estimate (days): ${task.get('Time Estimate')}`;
+    body += `\n\n[Airtable link](${process.env.AIRTABLE_LINK_PRE}{$task.id})`;
 
     return issues.createIssue({ title: name, body, labels });
   });

@@ -18,8 +18,8 @@ provider:
     AIRTABLE_LINK_PRE: ${self:custom.secrets.AIRTABLE_LINK_PRE}
 
 functions:
-  init:
-    handler: handler.init
+  # init:
+  #   handler: handler.init
   cron:
     handler: handler.transferTasks
     events:
