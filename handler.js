@@ -33,6 +33,19 @@ async function syncProjectLabels() {
   return projId2Label;
 }
 
+function getIssueBody(task) {
+  const desc = (task.get('Notes') || '').trim();
+  let body = desc ? `${desc}\n\n` : '';
+  body += `Time Estimate (days): ${task.get('Time Estimate')}`;
+  body += `\n\n[Airtable link](${process.env.AIRTABLE_LINK_PRE}${task.id})`;
+  return body;
+}
+
+function setEq(a, b) {
+  const bSet = new Set(b);
+  return a.reduce((eq, v) => (eq && bSet.has(v)), true);
+}
+
 module.exports.init = async (_event, _context) => {
   // delete all existing labels
   await Promise.all((await issues.listLabels({})).data
@@ -49,32 +62,62 @@ module.exports.transferTasks = async (_event, _context) => {
     view: 'Main View',
     filterByFormula: 'NOT({Status} = "done")',
   }).all();
-  const openTaskNames = new Set(openTasks.map(task => task.get('Name')));
+  const openTaskIds = new Set(openTasks.map(task => task.id));
 
   const openIssues = (await issues.listIssues({ state: 'open' })).data;
-  const openIssueTitles = new Set(openIssues.map(issue => issue.title));
+  const openIssueByTaskId = new Map(openIssues
+    .map(issue => {
+      const match = /\[Airtable link\].*\/(rec\w+)\)/.exec(issue.body);
+      if (match === null) return null;
+      return [match[1], issue];
+    })
+    .filter(kv => kv !== undefined));
 
-  const createIssuesFromTasks = openTasks.map(task => {
-    const name = task.get('Name');
-    if (openIssueTitles.has(name)) return;
-
-    const labels = task.get('Project')
+  function getIssueLabels(task) {
+    return task.get('Project')
       .map(projId => projId2Label.get(projId))
       .filter(label => label !== undefined);
+  }
+
+  const createIssuesFromTasks = openTasks.map(task => {
+    if (openIssueByTaskId.has(task.id)) return;
+
+    const labels = getIssueLabels(task);
     if (labels.length === 0) return;
 
-    const desc = (task.get('Notes') || '').trim();
-    let body = desc ? `**Description**: ${desc}\n\n` : '';
-    body += `Time Estimate (days): ${task.get('Time Estimate')}`;
-    body += `\n\n[Airtable link](${process.env.AIRTABLE_LINK_PRE}{$task.id})`;
-
-    return issues.createIssue({ title: name, body, labels });
+    return issues.createIssue({
+      title: task.get('Name'),
+      body: getIssueBody(task),
+      labels,
+    });
   });
 
-  const closeCompletedTaskIssues = openIssues.map(issue => {
-    if (openTaskNames.has(issue.title)) return;
-    return issues.editIssue(issue.number, { state: 'closed' });
-  });
+  const closeCompletedTaskIssues = Array.from(openIssueByTaskId.entries())
+    .map(([taskId, issue]) => {
+      if (openTaskIds.has(taskId)) return;
+      return issues.editIssue(issue.number, { state: 'closed' });
+    });
 
-  return Promise.all(createIssuesFromTasks.concat(closeCompletedTaskIssues));
+  const updateIssuesFromChangedTasks = openTasks
+    .map(task => {
+      const issue = openIssueByTaskId.get(task.id);
+      if (issue === undefined) return;
+
+      const newBody = getIssueBody(task);
+      const curLabels = issue.labels.map(l => l.name);
+      const newLabels = getIssueLabels(task);
+      const changed = issue.title !== task.get('Name')
+        || issue.body !== newBody
+        || !setEq(curLabels, newLabels);
+      if (!changed) return;
+      return issues.editIssue(issue.number, {
+        title: task.get('Name'),
+        body: newBody,
+        labels: newLabels,
+      });
+    });
+
+  return Promise.all(createIssuesFromTasks
+    .concat(closeCompletedTaskIssues)
+    .concat(updateIssuesFromChangedTasks));
 };
